@@ -103,7 +103,7 @@ jobs:
           echo "Browser assets copied into Android project."
 
       - name: Set up Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -139,9 +139,12 @@ jobs:
           {
             echo "ANDROID_HOME=$SDK"
             echo "ANDROID_SDK_ROOT=$SDK"
+          } >> "$GITHUB_ENV"
+
+          {
             echo "$TOOLS_DIR/latest/bin"
             echo "$SDK/platform-tools"
-          } >> "$GITHUB_ENV"
+          } >> "$GITHUB_PATH"
 
           echo "Android command-line tools installed."
 
@@ -153,8 +156,7 @@ jobs:
           SDK="$ANDROID_HOME"
           SDKMANAGER="$SDK/cmdline-tools/latest/bin/sdkmanager"
 
-          # Accept licenses without letting the expected yes-pipe
-          # shutdown status terminate the step.
+          # Accept licenses while ignoring the expected SIGPIPE from yes.
           set +o pipefail
           yes | "$SDKMANAGER" --sdk_root="$SDK" --licenses
           LICENSE_STATUS=${PIPESTATUS[1]}
