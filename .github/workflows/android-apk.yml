@@ -27,6 +27,8 @@ jobs:
           set -euo pipefail
 
           ZIP="THE_LAST_HOUR_PROJECT_ECHO_ANDROID_APK_BUILDER.zip"
+          BUILDER="android-builder/THE_LAST_HOUR_PROJECT_ECHO_ANDROID_APK_BUILDER"
+
           test -f "$ZIP" || {
             echo "::error::Builder ZIP not found: $ZIP"
             exit 1
@@ -35,8 +37,6 @@ jobs:
           mkdir -p android-builder
           unzip -q "$ZIP" -d android-builder
 
-          BUILDER="android-builder/THE_LAST_HOUR_PROJECT_ECHO_ANDROID_APK_BUILDER"
-
           test -f "$BUILDER/game/main.py" || {
             echo "::error::Builder game/main.py was not found"
             find android-builder -maxdepth 5 -type f | head -100
@@ -44,11 +44,11 @@ jobs:
           }
 
           test -f "$BUILDER/android/build.gradle" || {
-            echo "::error::Android Gradle build file was not found"
+            echo "::error::Android build.gradle was not found"
             exit 1
           }
 
-          echo "Builder project extracted successfully."
+          echo "Builder project extracted."
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -62,9 +62,6 @@ jobs:
           set -euo pipefail
 
           python -m pip install --upgrade pip pygbag
-
-          # Use Pygbag's default template.
-          # Do not request the unavailable noctx.tmpl.
           python -m pygbag --build --PYBUILD 3.12 --ume_block=0 game
 
           test -d game/build/web || {
@@ -73,11 +70,9 @@ jobs:
           }
 
           test -n "$(find game/build/web -type f -print -quit)" || {
-            echo "::error::Browser build directory is empty"
+            echo "::error::Browser build is empty"
             exit 1
           }
-
-          echo "Browser build completed."
 
       - name: Copy browser files into Android assets
         shell: bash
@@ -88,17 +83,13 @@ jobs:
           SOURCE="$BUILDER/game/build/web"
           DEST="$BUILDER/android/app/src/main/assets/game"
 
-          test -d "$SOURCE"
-
           mkdir -p "$DEST"
           cp -a "$SOURCE/." "$DEST/"
 
           test -n "$(find "$DEST" -type f -print -quit)" || {
-            echo "::error::No browser files were copied"
+            echo "::error::No browser files copied"
             exit 1
           }
-
-          echo "Browser assets copied."
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -106,30 +97,44 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Configure Android SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/android-sdk}}"
+          mkdir -p "$SDK"
+
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          echo "$SDK/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "$SDK/platform-tools" >> "$GITHUB_PATH"
+
+          if ! command -v sdkmanager >/dev/null 2>&1; then
+            echo "::error::sdkmanager is not installed on this runner."
+            echo "Install Android command-line tools before continuing."
+            exit 1
+          fi
+
+          echo "Android SDK path: $SDK"
 
       - name: Install Android SDK components
         shell: bash
         run: |
           set -euo pipefail
 
-          sdkmanager --install \
-            "platform-tools" \
-            "platforms;android-35" \
-            "build-tools;35.0.0"
+          yes | sdkmanager --licenses >/dev/null || true
+
+          sdkmanager --install "platform-tools"
+          sdkmanager --install "platforms;android-35"
+          sdkmanager --install "build-tools;35.0.0"
 
       - name: Verify Android SDK
         shell: bash
         run: |
           set -euo pipefail
 
-          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
-
-          test -n "$SDK" || {
-            echo "::error::Android SDK path is not configured"
-            exit 1
-          }
+          SDK="$ANDROID_HOME"
 
           test -x "$SDK/platform-tools/adb" || {
             echo "::error::Android platform-tools are missing"
@@ -142,7 +147,7 @@ jobs:
           }
 
           test -d "$SDK/build-tools/35.0.0" || {
-            echo "::error::Android build-tools 35.0.0 are missing"
+            echo "::error::Android build-tools are missing"
             exit 1
           }
 
@@ -166,15 +171,13 @@ jobs:
           APK="$BUILDER/android/app/build/outputs/apk/debug/app-debug.apk"
 
           test -f "$APK" || {
-            echo "::error::APK was not created at the expected location"
+            echo "::error::APK was not created"
             find "$BUILDER/android" -path '*outputs*apk*' -type f
             exit 1
           }
 
           mkdir -p output
           cp "$APK" output/project-echo-debug.apk
-
-          echo "Debug APK created."
 
       - name: Upload APK artifact
         if: success()
