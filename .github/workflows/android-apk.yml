@@ -13,6 +13,7 @@ permissions:
 
 jobs:
   build-apk:
+    name: Build Project Echo Android APK
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
@@ -26,7 +27,6 @@ jobs:
           set -euo pipefail
 
           ZIP="THE_LAST_HOUR_PROJECT_ECHO_ANDROID_APK_BUILDER.zip"
-
           test -f "$ZIP" || {
             echo "::error::Builder ZIP not found: $ZIP"
             exit 1
@@ -38,17 +38,17 @@ jobs:
           BUILDER="android-builder/THE_LAST_HOUR_PROJECT_ECHO_ANDROID_APK_BUILDER"
 
           test -f "$BUILDER/game/main.py" || {
-            echo "::error::game/main.py missing from builder ZIP"
-            find android-builder -maxdepth 4 -type f | head -100
+            echo "::error::Builder game/main.py was not found"
+            find android-builder -maxdepth 5 -type f | head -100
             exit 1
           }
 
           test -f "$BUILDER/android/build.gradle" || {
-            echo "::error::Android Gradle project missing from builder ZIP"
+            echo "::error::Android Gradle build file was not found"
             exit 1
           }
 
-          echo "Builder project found."
+          echo "Builder project extracted successfully."
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -63,16 +63,21 @@ jobs:
 
           python -m pip install --upgrade pip pygbag
 
-          # Use the default Pygbag template.
-          # Do not use the unavailable noctx.tmpl template.
+          # Use Pygbag's default template.
+          # Do not request the unavailable noctx.tmpl.
           python -m pygbag --build --PYBUILD 3.12 --ume_block=0 game
 
           test -d game/build/web || {
-            echo "::error::Pygbag did not produce game/build/web"
+            echo "::error::Pygbag did not create game/build/web"
             exit 1
           }
 
-          echo "Browser build output found."
+          test -n "$(find game/build/web -type f -print -quit)" || {
+            echo "::error::Browser build directory is empty"
+            exit 1
+          }
+
+          echo "Browser build completed."
 
       - name: Copy browser files into Android assets
         shell: bash
@@ -80,16 +85,20 @@ jobs:
           set -euo pipefail
 
           BUILDER="android-builder/THE_LAST_HOUR_PROJECT_ECHO_ANDROID_APK_BUILDER"
-          ASSETS="$BUILDER/android/app/src/main/assets/game"
+          SOURCE="$BUILDER/game/build/web"
+          DEST="$BUILDER/android/app/src/main/assets/game"
 
-          mkdir -p "$ASSETS"
+          test -d "$SOURCE"
 
-          cp -a "$BUILDER/game/build/web/." "$ASSETS/"
+          mkdir -p "$DEST"
+          cp -a "$SOURCE/." "$DEST/"
 
-          test -n "$(find "$ASSETS" -type f -print -quit)" || {
-            echo "::error::No browser files were copied into Android assets"
+          test -n "$(find "$DEST" -type f -print -quit)" || {
+            echo "::error::No browser files were copied"
             exit 1
           }
+
+          echo "Browser assets copied."
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -99,25 +108,26 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
-        with:
-          cmdline-tools-version: "11076708"
-          packages: |
-            platform-tools
-            platforms;android-35
-            build-tools;35.0.0
+
+      - name: Install Android SDK components
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
 
       - name: Verify Android SDK
         shell: bash
         run: |
           set -euo pipefail
 
-          echo "ANDROID_HOME=${ANDROID_HOME:-not-set}"
-          echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-not-set}"
-
           SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
 
           test -n "$SDK" || {
-            echo "::error::Android SDK path was not configured"
+            echo "::error::Android SDK path is not configured"
             exit 1
           }
 
@@ -136,7 +146,7 @@ jobs:
             exit 1
           }
 
-          echo "Required Android SDK components are available."
+          echo "Android SDK verified."
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -156,7 +166,7 @@ jobs:
           APK="$BUILDER/android/app/build/outputs/apk/debug/app-debug.apk"
 
           test -f "$APK" || {
-            echo "::error::Gradle did not produce the expected APK"
+            echo "::error::APK was not created at the expected location"
             find "$BUILDER/android" -path '*outputs*apk*' -type f
             exit 1
           }
@@ -164,7 +174,7 @@ jobs:
           mkdir -p output
           cp "$APK" output/project-echo-debug.apk
 
-          echo "APK created successfully."
+          echo "Debug APK created."
 
       - name: Upload APK artifact
         if: success()
