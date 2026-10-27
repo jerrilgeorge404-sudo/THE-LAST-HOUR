@@ -27,8 +27,9 @@ jobs:
           test -f "$ZIP" || { echo "::error::Builder ZIP not found: $ZIP"; exit 1; }
           mkdir -p android-builder
           unzip -q "$ZIP" -d android-builder
-          test -f android-builder/game/main.py || { echo "::error::game/main.py missing from builder ZIP"; find android-builder -maxdepth 3 -type f | head -80; exit 1; }
-          test -f android-builder/android/build.gradle || { echo "::error::Android Gradle project missing from builder ZIP"; exit 1; }
+          BUILDER="android-builder/THE_LAST_HOUR_PROJECT_ECHO_ANDROID_APK_BUILDER"
+          test -f "$BUILDER/game/main.py" || { echo "::error::game/main.py missing from builder ZIP"; find android-builder -maxdepth 4 -type f | head -100; exit 1; }
+          test -f "$BUILDER/android/build.gradle" || { echo "::error::Android Gradle project missing from builder ZIP"; exit 1; }
           echo "Builder source and Android project found."
 
       - name: Set up Python
@@ -37,7 +38,7 @@ jobs:
           python-version: "3.12"
 
       - name: Build Python game for browser runtime
-        working-directory: android-builder
+        working-directory: android-builder/THE_LAST_HOUR_PROJECT_ECHO_ANDROID_APK_BUILDER
         shell: bash
         run: |
           set -euo pipefail
@@ -49,8 +50,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p android-builder/android/app/src/main/assets/game
-          cp -a android-builder/game/build/web/. android-builder/android/app/src/main/assets/game/
+          BUILDER="android-builder/THE_LAST_HOUR_PROJECT_ECHO_ANDROID_APK_BUILDER"
+          mkdir -p "$BUILDER/android/app/src/main/assets/game"
+          cp -a "$BUILDER/game/build/web/." "$BUILDER/android/app/src/main/assets/game/"
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -76,9 +78,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gradle --no-daemon --stacktrace -p android-builder/android assembleDebug
-          APK="android-builder/android/app/build/outputs/apk/debug/app-debug.apk"
-          test -f "$APK" || { echo "::error::Gradle finished without producing the expected APK"; find android-builder/android -path '*outputs*apk*' -type f; exit 1; }
+          BUILDER="android-builder/THE_LAST_HOUR_PROJECT_ECHO_ANDROID_APK_BUILDER"
+          gradle --no-daemon --stacktrace -p "$BUILDER/android" assembleDebug
+          APK="$BUILDER/android/app/build/outputs/apk/debug/app-debug.apk"
+          test -f "$APK" || { echo "::error::Gradle finished without producing the expected APK"; find "$BUILDER/android" -path '*outputs*apk*' -type f; exit 1; }
           mkdir -p output
           cp "$APK" output/project-echo-debug.apk
 
