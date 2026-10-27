@@ -29,31 +29,32 @@ jobs:
           ZIP="THE_LAST_HOUR_PROJECT_ECHO_ANDROID_APK_BUILDER.zip"
           BUILDER="android-builder/THE_LAST_HOUR_PROJECT_ECHO_ANDROID_APK_BUILDER"
 
-          test -f "$ZIP" || {
+          if [ ! -f "$ZIP" ]; then
             echo "::error::Builder ZIP not found: $ZIP"
             exit 1
-          }
+          fi
 
           mkdir -p android-builder
           unzip -q "$ZIP" -d android-builder
 
-          test -f "$BUILDER/game/main.py" || {
+          if [ ! -f "$BUILDER/game/main.py" ]; then
             echo "::error::Builder game/main.py was not found"
             find android-builder -maxdepth 5 -type f | head -100
             exit 1
-          }
+          fi
 
-          test -f "$BUILDER/android/build.gradle" || {
+          if [ ! -f "$BUILDER/android/build.gradle" ]; then
             echo "::error::Android build.gradle was not found"
             exit 1
-          }
+          fi
 
-          echo "Builder project extracted."
+          echo "Android builder project extracted successfully."
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
 
       - name: Build Python game for browser runtime
         working-directory: android-builder/THE_LAST_HOUR_PROJECT_ECHO_ANDROID_APK_BUILDER
@@ -61,18 +62,23 @@ jobs:
         run: |
           set -euo pipefail
 
-          python -m pip install --upgrade pip pygbag
+          python -m pip install --upgrade pip
+          python -m pip install pygbag
+
+          # Do not use the obsolete noctx.tmpl template.
           python -m pygbag --build --PYBUILD 3.12 --ume_block=0 game
 
-          test -d game/build/web || {
+          if [ ! -d game/build/web ]; then
             echo "::error::Pygbag did not create game/build/web"
             exit 1
-          }
+          fi
 
-          test -n "$(find game/build/web -type f -print -quit)" || {
+          if [ -z "$(find game/build/web -type f -print -quit)" ]; then
             echo "::error::Browser build is empty"
             exit 1
-          }
+          fi
+
+          echo "Pygbag build completed."
 
       - name: Copy browser files into Android assets
         shell: bash
@@ -83,13 +89,20 @@ jobs:
           SOURCE="$BUILDER/game/build/web"
           DEST="$BUILDER/android/app/src/main/assets/game"
 
+          if [ ! -d "$SOURCE" ]; then
+            echo "::error::Browser build directory is missing"
+            exit 1
+          fi
+
           mkdir -p "$DEST"
           cp -a "$SOURCE/." "$DEST/"
 
-          test -n "$(find "$DEST" -type f -print -quit)" || {
-            echo "::error::No browser files copied"
+          if [ -z "$(find "$DEST" -type f -print -quit)" ]; then
+            echo "::error::No browser files were copied"
             exit 1
-          }
+          fi
+
+          echo "Android web assets copied."
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -97,37 +110,64 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Configure Android SDK
+      - name: Install Android command-line tools
         shell: bash
         run: |
           set -euo pipefail
 
-          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/android-sdk}}"
-          mkdir -p "$SDK"
+          SDK="$HOME/android-sdk"
+          TOOLS_DIR="$SDK/cmdline-tools"
+          DOWNLOAD_DIR="$RUNNER_TEMP/android-command-line-tools"
 
-          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
-          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
-          echo "$SDK/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
-          echo "$SDK/platform-tools" >> "$GITHUB_PATH"
+          # Install into a known location rather than relying on
+          # an Android SDK preinstalled on the GitHub runner.
+          mkdir -p "$TOOLS_DIR" "$DOWNLOAD_DIR"
 
-          if ! command -v sdkmanager >/dev/null 2>&1; then
-            echo "::error::sdkmanager is not installed on this runner."
-            echo "Install Android command-line tools before continuing."
+          curl --fail --location --retry 3 \
+            "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip" \
+            --output "$DOWNLOAD_DIR/commandlinetools.zip"
+
+          unzip -q "$DOWNLOAD_DIR/commandlinetools.zip" \
+            -d "$DOWNLOAD_DIR"
+
+          mkdir -p "$TOOLS_DIR/latest"
+          cp -a "$DOWNLOAD_DIR/cmdline-tools/." "$TOOLS_DIR/latest/"
+
+          SDKMANAGER="$TOOLS_DIR/latest/bin/sdkmanager"
+
+          if [ ! -x "$SDKMANAGER" ]; then
+            echo "::error::Android sdkmanager installation failed"
             exit 1
           fi
 
-          echo "Android SDK path: $SDK"
+          {
+            echo "ANDROID_HOME=$SDK"
+            echo "ANDROID_SDK_ROOT=$SDK"
+            echo "$TOOLS_DIR/latest/bin"
+            echo "$SDK/platform-tools"
+          } >> "$GITHUB_ENV"
 
-      - name: Install Android SDK components
+          echo "Android command-line tools installed."
+
+      - name: Accept licenses and install Android SDK
         shell: bash
         run: |
           set -euo pipefail
 
-          yes | sdkmanager --licenses >/dev/null || true
+          SDK="$ANDROID_HOME"
+          SDKMANAGER="$SDK/cmdline-tools/latest/bin/sdkmanager"
 
-          sdkmanager --install "platform-tools"
-          sdkmanager --install "platforms;android-35"
-          sdkmanager --install "build-tools;35.0.0"
+          # Accept the SDK licenses.
+          yes | "$SDKMANAGER" --sdk_root="$SDK" --licenses \
+            || true
+
+          # Install only the packages needed for this build.
+          "$SDKMANAGER" --sdk_root="$SDK" \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
+
+          echo "Required Android SDK packages installed."
 
       - name: Verify Android SDK
         shell: bash
@@ -151,7 +191,7 @@ jobs:
             exit 1
           }
 
-          echo "Android SDK verified."
+          echo "Android SDK verification passed."
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -170,14 +210,16 @@ jobs:
 
           APK="$BUILDER/android/app/build/outputs/apk/debug/app-debug.apk"
 
-          test -f "$APK" || {
-            echo "::error::APK was not created"
+          if [ ! -f "$APK" ]; then
+            echo "::error::Gradle finished without creating the expected APK"
             find "$BUILDER/android" -path '*outputs*apk*' -type f
             exit 1
-          }
+          fi
 
           mkdir -p output
           cp "$APK" output/project-echo-debug.apk
+
+          echo "APK created successfully."
 
       - name: Upload APK artifact
         if: success()
