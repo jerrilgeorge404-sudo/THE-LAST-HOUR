@@ -26,6 +26,7 @@ jobs:
           set -euo pipefail
 
           ZIP="THE_LAST_HOUR_PROJECT_ECHO_ANDROID_APK_BUILDER.zip"
+
           test -f "$ZIP" || {
             echo "::error::Builder ZIP not found: $ZIP"
             exit 1
@@ -47,7 +48,7 @@ jobs:
             exit 1
           }
 
-          echo "Builder source and Android project found."
+          echo "Builder project found."
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -62,8 +63,8 @@ jobs:
 
           python -m pip install --upgrade pip pygbag
 
-          # Use Pygbag's default template.
-          # The old noctx.tmpl template URL returns HTTP 404.
+          # Use the default Pygbag template.
+          # Do not use the unavailable noctx.tmpl template.
           python -m pygbag --build --PYBUILD 3.12 --ume_block=0 game
 
           test -d game/build/web || {
@@ -73,17 +74,22 @@ jobs:
 
           echo "Browser build output found."
 
-      - name: Copy game into Android app assets
+      - name: Copy browser files into Android assets
         shell: bash
         run: |
           set -euo pipefail
 
           BUILDER="android-builder/THE_LAST_HOUR_PROJECT_ECHO_ANDROID_APK_BUILDER"
+          ASSETS="$BUILDER/android/app/src/main/assets/game"
 
-          mkdir -p "$BUILDER/android/app/src/main/assets/game"
+          mkdir -p "$ASSETS"
 
-          cp -a "$BUILDER/game/build/web/." \
-            "$BUILDER/android/app/src/main/assets/game/"
+          cp -a "$BUILDER/game/build/web/." "$ASSETS/"
+
+          test -n "$(find "$ASSETS" -type f -print -quit)" || {
+            echo "::error::No browser files were copied into Android assets"
+            exit 1
+          }
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -93,16 +99,44 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          cmdline-tools-version: "11076708"
+          packages: |
+            platform-tools
+            platforms;android-35
+            build-tools;35.0.0
 
-      - name: Install Android SDK components
+      - name: Verify Android SDK
         shell: bash
         run: |
           set -euo pipefail
 
-          sdkmanager \
-            "platform-tools" \
-            "platforms;android-35" \
-            "build-tools;35.0.0"
+          echo "ANDROID_HOME=${ANDROID_HOME:-not-set}"
+          echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-not-set}"
+
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+
+          test -n "$SDK" || {
+            echo "::error::Android SDK path was not configured"
+            exit 1
+          }
+
+          test -x "$SDK/platform-tools/adb" || {
+            echo "::error::Android platform-tools are missing"
+            exit 1
+          }
+
+          test -d "$SDK/platforms/android-35" || {
+            echo "::error::Android API 35 is missing"
+            exit 1
+          }
+
+          test -d "$SDK/build-tools/35.0.0" || {
+            echo "::error::Android build-tools 35.0.0 are missing"
+            exit 1
+          }
+
+          echo "Required Android SDK components are available."
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -122,7 +156,7 @@ jobs:
           APK="$BUILDER/android/app/build/outputs/apk/debug/app-debug.apk"
 
           test -f "$APK" || {
-            echo "::error::Gradle finished without producing the expected APK"
+            echo "::error::Gradle did not produce the expected APK"
             find "$BUILDER/android" -path '*outputs*apk*' -type f
             exit 1
           }
