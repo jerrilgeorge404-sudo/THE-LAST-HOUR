@@ -1,3 +1,4 @@
+
 name: Project Echo Android APK build
 
 on:
@@ -23,13 +24,29 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           ZIP="THE_LAST_HOUR_PROJECT_ECHO_ANDROID_APK_BUILDER.zip"
-          test -f "$ZIP" || { echo "::error::Builder ZIP not found: $ZIP"; exit 1; }
+          test -f "$ZIP" || {
+            echo "::error::Builder ZIP not found: $ZIP"
+            exit 1
+          }
+
           mkdir -p android-builder
           unzip -q "$ZIP" -d android-builder
+
           BUILDER="android-builder/THE_LAST_HOUR_PROJECT_ECHO_ANDROID_APK_BUILDER"
-          test -f "$BUILDER/game/main.py" || { echo "::error::game/main.py missing from builder ZIP"; find android-builder -maxdepth 4 -type f | head -100; exit 1; }
-          test -f "$BUILDER/android/build.gradle" || { echo "::error::Android Gradle project missing from builder ZIP"; exit 1; }
+
+          test -f "$BUILDER/game/main.py" || {
+            echo "::error::game/main.py missing from builder ZIP"
+            find android-builder -maxdepth 4 -type f | head -100
+            exit 1
+          }
+
+          test -f "$BUILDER/android/build.gradle" || {
+            echo "::error::Android Gradle project missing from builder ZIP"
+            exit 1
+          }
+
           echo "Builder source and Android project found."
 
       - name: Set up Python
@@ -42,17 +59,31 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           python -m pip install --upgrade pip pygbag
-          python -m pygbag --build --PYBUILD 3.12 --template noctx.tmpl --ume_block=0 game
-          test -d game/build/web || { echo "::error::Pygbag did not produce game/build/web"; exit 1; }
+
+          # Use Pygbag's default template.
+          # The old noctx.tmpl template URL returns HTTP 404.
+          python -m pygbag --build --PYBUILD 3.12 --ume_block=0 game
+
+          test -d game/build/web || {
+            echo "::error::Pygbag did not produce game/build/web"
+            exit 1
+          }
+
+          echo "Browser build output found."
 
       - name: Copy game into Android app assets
         shell: bash
         run: |
           set -euo pipefail
+
           BUILDER="android-builder/THE_LAST_HOUR_PROJECT_ECHO_ANDROID_APK_BUILDER"
+
           mkdir -p "$BUILDER/android/app/src/main/assets/game"
-          cp -a "$BUILDER/game/build/web/." "$BUILDER/android/app/src/main/assets/game/"
+
+          cp -a "$BUILDER/game/build/web/." \
+            "$BUILDER/android/app/src/main/assets/game/"
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -67,7 +98,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -78,12 +113,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           BUILDER="android-builder/THE_LAST_HOUR_PROJECT_ECHO_ANDROID_APK_BUILDER"
-          gradle --no-daemon --stacktrace -p "$BUILDER/android" assembleDebug
+
+          gradle --no-daemon --stacktrace \
+            -p "$BUILDER/android" assembleDebug
+
           APK="$BUILDER/android/app/build/outputs/apk/debug/app-debug.apk"
-          test -f "$APK" || { echo "::error::Gradle finished without producing the expected APK"; find "$BUILDER/android" -path '*outputs*apk*' -type f; exit 1; }
+
+          test -f "$APK" || {
+            echo "::error::Gradle finished without producing the expected APK"
+            find "$BUILDER/android" -path '*outputs*apk*' -type f
+            exit 1
+          }
+
           mkdir -p output
           cp "$APK" output/project-echo-debug.apk
+
+          echo "APK created successfully."
 
       - name: Upload APK artifact
         if: success()
